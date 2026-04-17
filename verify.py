@@ -30,7 +30,7 @@ async def verify_vessels_live():
         # Run for a set timeout (e.g., 60 seconds) to verify what's currently "visible"
         try:
             while len(found_vessels) < len(targets):
-                message = await asyncio.wait_for(websocket.recv(), timeout=60)
+                message = await asyncio.wait_for(websocket.recv(), timeout=300)
                 msg_data = json.loads(message)
                 
                 mmsi = str(msg_data["MetaData"]["MMSI"])
