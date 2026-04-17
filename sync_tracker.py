@@ -82,19 +82,23 @@ def write_markdown(results, targets):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
     lines = [
-        f"# Marine Vessel Tracker Report",
+        f"# ⚓ Marine Vessel Tracker Report",
         f"**Last Sync:** {timestamp}",
         f"",
-        f"| Vessel Name | MMSI | Latitude | Longitude | Status | Last Seen |",
-        f"| :--- | :--- | :--- | :--- | :--- | :--- |"
+        f"| Vessel Name | MMSI | Status | Last Seen | Location |",
+        f"| :--- | :--- | :--- | :--- | :--- |"
     ]
     
     for mmsi in targets:
         if mmsi in results:
             v = results[mmsi]
-            lines.append(f"| {v['name']} | `{mmsi}` | {v['lat']} | {v['lon']} | {v['status']} | {v['time']} |")
+            # Create Google Maps URL
+            map_url = f"https://www.google.com/maps/search/?api=1&query={v['lat']},{v['lon']}"
+            map_link = f"[📍 View on Map]({map_url})"
+            
+            lines.append(f"| **{v['name']}** | `{mmsi}` | {v['status']} | {v['time']} | {map_link} |")
         else:
-            lines.append(f"| Unknown | `{mmsi}` | - | - | *No signal in window* | - |")
+            lines.append(f"| *Unknown* | `{mmsi}` | *No signal* | - | - |")
 
     with open(OUTPUT_FILE, 'w') as f:
         f.write("\n".join(lines))
