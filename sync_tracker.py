@@ -1,111 +1,109 @@
-# Dependencies: Ensure you've run pip install websockets python-dotenv
-
 import asyncio
 import websockets
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# Configuration
+# --- CONFIGURATION ---
 INPUT_FILE = 'vessels.txt'
 OUTPUT_FILE = 'vessel_status.md'
-TIMEOUT_SECONDS = 30  # How long to listen for signals per run
 API_KEY = os.getenv("AISSTREAM_KEY")
+RUN_TIMEOUT = 120  # Total seconds to wait for signals (2 minutes)
 
-def load_targets():
-    targets = []
-    if not os.path.exists(INPUT_FILE):
-        return targets
+def load_vessels():
+    vessels = []
+    if not os.path.exists(INPUT_FILE): return vessels
     with open(INPUT_FILE, 'r') as f:
         for line in f:
-            line = line.strip()
-            if line and not line.startswith('mmsi'):
-                # Extract MMSI (first column)
-                targets.append(line.split(',')[0].strip())
-    return targets
+            parts = line.strip().split(',')
+            if parts and parts[0].isdigit():
+                vessels.append(parts[0].strip())
+    return vessels
 
-async def sync_vessels():
-    targets = load_targets()
+async def connect_ais_stream():
+    targets = load_vessels()
     if not targets:
-        print("No MMSIs found in vessels.txt")
+        print("❌ No MMSI targets found in vessels.txt")
         return
 
-    results = {}
+    tracked_data = {}
     
-    print(f"Connecting to AISStream to track {len(targets)} vessels...")
-    
+    print(f"📡 Starting sync for {len(targets)} vessels (Timeout: {RUN_TIMEOUT}s)...")
+
     try:
         async with websockets.connect("wss://stream.aisstream.io/v0/stream") as websocket:
-            subscribe_msg = {
+            # Using the official Global Bounding Box + MMSI Filter
+            subscribe_message = {
                 "APIKey": API_KEY,
+                "BoundingBoxes": [[[-90, -180], [90, 180]]], 
                 "FiltersShipMMSI": targets,
                 "FilterMessageTypes": ["PositionReport"]
             }
 
-            await websocket.send(json.dumps(subscribe_msg))
+            await websocket.send(json.dumps(subscribe_message))
 
-            # Listen for signals until timeout
+            # Start timer
             start_time = asyncio.get_event_loop().time()
-            while (asyncio.get_event_loop().time() - start_time) < TIMEOUT_SECONDS:
+
+            while (asyncio.get_event_loop().time() - start_time) < RUN_TIMEOUT:
                 try:
-                    # Wait for a message with a short internal timeout to check the loop condition
-                    message = await asyncio.wait_for(websocket.recv(), timeout=1.0)
-                    msg_data = json.loads(message)
+                    # Wait for message with a 1s buffer
+                    message_json = await asyncio.wait_for(websocket.recv(), timeout=2.0)
+                    message = json.loads(message_json)
                     
-                    mmsi = str(msg_data["MetaData"]["MMSI"])
-                    name = msg_data["MetaData"]["ShipName"].strip()
-                    lat = msg_data["Message"]["PositionReport"]["Latitude"]
-                    lon = msg_data["Message"]["PositionReport"]["Longitude"]
-                    status = msg_data["Message"]["PositionReport"].get("NavigationalStatus", "N/A")
-                    
-                    # Update/Add result (keeps the latest signal)
-                    results[mmsi] = {
-                        "name": name,
-                        "lat": lat,
-                        "lon": lon,
-                        "status": status,
-                        "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    }
-                    print(f"Captured: {name} ({mmsi})")
-                    
+                    if message.get("MessageType") == "PositionReport":
+                        meta = message.get("MetaData", {})
+                        pos = message['Message']['PositionReport']
+                        
+                        mmsi = str(meta.get("MMSI"))
+                        name = meta.get("ShipName", "Unknown").strip()
+                        
+                        tracked_data[mmsi] = {
+                            "name": name,
+                            "lat": pos['Latitude'],
+                            "lon": pos['Longitude'],
+                            "status": pos.get("NavigationalStatus", "Moving/Unknown"),
+                            "time": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+                        }
+                        print(f"✅ Found: {name} ({mmsi})")
+
+                        # If we found everyone, we can stop early
+                        if len(tracked_data) == len(targets):
+                            break
+                            
                 except asyncio.TimeoutError:
-                    continue 
-                    
+                    continue # Keep loop alive until RUN_TIMEOUT is hit
+
     except Exception as e:
-        print(f"Connection error: {e}")
+        print(f"❌ Connection Error: {e}")
 
-    # Generate Markdown Output, added a "Map Link" column
-    write_markdown(results, targets)
+    generate_markdown(tracked_data, targets)
 
-def write_markdown(results, targets):
+def generate_markdown(data, targets):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
     lines = [
-        f"# ⚓ Marine Vessel Tracker Report",
-        f"**Last Sync:** {timestamp}",
+        f"# 🚢 Marine Vessel Tracker Report",
+        f"**Sync Time:** {timestamp} (Local)",
         f"",
-        f"| Vessel Name | MMSI | Status | Last Seen | Location |",
+        f"| Vessel Name | MMSI | Status | Location | Last Seen |",
         f"| :--- | :--- | :--- | :--- | :--- |"
     ]
-    
-    for mmsi in targets:
-        if mmsi in results:
-            v = results[mmsi]
-            # Create Google Maps URL
-            map_url = f"https://www.google.com/maps/search/?api=1&query={v['lat']},{v['lon']}"
-            map_link = f"[📍 View on Map]({map_url})"
-            
-            lines.append(f"| **{v['name']}** | `{mmsi}` | {v['status']} | {v['time']} | {map_link} |")
-        else:
-            lines.append(f"| *Unknown* | `{mmsi}` | *No signal* | - | - |")
 
-    with open(OUTPUT_FILE, 'w') as f:
+    for mmsi in targets:
+        if mmsi in data:
+            v = data[mmsi]
+            map_url = f"https://www.google.com/maps?q={v['lat']},{v['lon']}"
+            lines.append(f"| **{v['name']}** | `{mmsi}` | {v['status']} | [📍 View Map]({map_url}) | {v['time']} |")
+        else:
+            # This is where the fallback would go
+            lines.append(f"| *Signal Lost* | `{mmsi}` | Offline/Out of Range | - | - |")
+
+    with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:
         f.write("\n".join(lines))
-    
-    print(f"\nReport generated: {OUTPUT_FILE}")
+    print(f"📝 Report updated in {OUTPUT_FILE}")
 
 if __name__ == "__main__":
-    asyncio.run(sync_vessels())
+    asyncio.run(connect_ais_stream())
