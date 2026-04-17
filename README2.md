@@ -11,9 +11,10 @@ Every message from AISStream.io includes a MetaData object that contains the Shi
 How to use AISStream for Verification
 Instead of a separate script, you can build a "Discovery & Verification" phase into your tracker. When a signal comes in, the script checks if the name matches your vessels.txt.
 
-Here is a logic update for your verify.py using only the AISStream key:
+## Here is a logic update for your verify.py using only the AISStream key:
 
-Python
+```
+#Python
 import asyncio
 import websockets
 import json
@@ -64,7 +65,9 @@ async def verify_vessels_live():
 
 if __name__ == "__main__":
     asyncio.run(verify_vessels_live())
-Why this works for your schedule:
+```
+
+## Why this works for your schedule:
 No waiting for OpenShipData: You can start today with just your AISStream key.
 
 Accuracy: You are seeing the actual name the ship is broadcasting right now.
@@ -78,7 +81,7 @@ Database (OpenShipData): Good for ships that are currently "offline."
 
 Stream (AISStream): Best for ships currently "active" and near shore.
 
-Next Step: Since you're running this on a schedule, would you like me to wrap this into a single "Sync" script that logs the name, position, and timestamp to a CSV file?
+## Next Step: Since you're running this on a schedule, would you like me to wrap this into a single "Sync" script that logs the name, position, and timestamp to a CSV file?
 
 Next Step: Since you're running this on a schedule, would you like me to wrap this into a single "Sync" script that logs the name, position, and timestamp to a CSV file?
 
@@ -88,10 +91,11 @@ I will generate a single Python script designed to run on a schedule. This scrip
 
 This approach is ideal for your "2x daily" requirement because it includes a 30-second timeout window. It will wait for signals, and then gracefully close and save the file.
 
-Step 1: Create the Python Script
+## Step 1: Create the Python Script
 Save this as sync_tracker.py in your repository.
 
-Python
+```
+#Python
 import asyncio
 import websockets
 import json
@@ -197,20 +201,89 @@ def write_markdown(results, targets):
 
 if __name__ == "__main__":
     asyncio.run(sync_vessels())
-Step 2: How it works on your schedule
+```
+
+## Step 2: How it works on your schedule
 Input: It reads vessels.txt.
 
 Collection: It stays open for 30 seconds. If a vessel on your list broadcasts a signal during that time, it captures it.
 
 Verification: It uses the ShipName from the metadata to fill the Markdown table, effectively verifying the identity.
 
-Output: It overwrites vessel_status.md with a clean table.
+*** Output: It overwrites vessel_status.md with a clean table. ***
 
 ---
-Step 3: Scheduling (The Platform Engineer Way)Since you are running this 2x daily, you can use a simple Cron job if you are running this on a local Linux server or Mac:Bash# Open crontab
+## Step 3: Scheduling (The Platform Engineer Way)Since you are running this 2x daily, you can use a simple Cron job if you are running this on a local Linux server or Mac:Bash# Open crontab
 crontab -e
 
 # Run at 08:00 and 20:00 every day
 0 8,20 * * * /usr/bin/python3 /path/to/your/repo/sync_tracker.py
 Expected Output (vessel_status.md)Vessel NameMMSILatitudeLongitudeStatusLast SeenQUEEN MARY 223510262950.8123-1.1234Underway using Engine2026-04-17 08:00:15Unknown311000553--
+
+---
+
+Would you like to add a "Map Link" column to the Markdown table that automatically creates a Google Maps link for the vessel's coordinates?
+
+Would you like to add a "Map Link" column to the Markdown table that automatically creates a Google Maps link for the vessel's coordinates?
+
+yes
+
+Adding a map link is a great touch—it turns a static report into an interactive dashboard. In Markdown, we can format this as a clickable button or a simple link that opens Google Maps directly at the vessel's coordinates.
+
+I’ve updated the write_markdown function below. You can replace the corresponding function in your sync_tracker.py script.
+
+Updated write_markdown Function
+
+<pre>
+#Python
+
+
+def write_markdown(results, targets):
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    lines = [
+        f"# ⚓ Marine Vessel Tracker Report",
+        f"**Last Sync:** {timestamp}",
+        f"",
+        f"| Vessel Name | MMSI | Status | Last Seen | Location |",
+        f"| :--- | :--- | :--- | :--- | :--- |"
+    ]
+    
+    for mmsi in targets:
+        if mmsi in results:
+            v = results[mmsi]
+            # Create Google Maps URL
+            map_url = f"https://www.google.com/maps/search/?api=1&query={v['lat']},{v['lon']}"
+            map_link = f"[📍 View on Map]({map_url})"
+            
+            lines.append(f"| **{v['name']}** | `{mmsi}` | {v['status']} | {v['time']} | {map_link} |")
+        else:
+            lines.append(f"| *Unknown* | `{mmsi}` | *No signal* | - | - |")
+
+    with open(OUTPUT_FILE, 'w') as f:
+        f.write("\n".join(lines))
+    
+    print(f"\nReport generated: {OUTPUT_FILE}")
+
+</pre>
+
+
+## How the Output Will Look
+When you open vessel_status.md in your IDE (like VS Code or Obsidian) or on GitHub, the table will look like this:
+
+Vessel Name	MMSI	Status	Last Seen	Location
+QUEEN MARY 2	235102629	Underway	2026-04-17 08:00:15	📍 View on Map
+Unknown	311000553	No signal	-	-
+
+
+## Final Implementation Checklist
+Dependencies: Ensure you've run pip install websockets python-dotenv.
+
+Environment: Your .env file must have AISSTREAM_KEY=your_key_here.
+
+Permissions: If running via Cron, ensure the script has write permissions to the directory to update the .md file.
+
+GitHub Automation (Optional): Since you're using a repo, you could even use GitHub Actions to run this script 2x daily. It would automatically commit the updated vessel_status.md back to your repo so you can check it from your phone without hosting anything.
+
+Does this structure work for your current local setup, or should we look at the GitHub Actions YAML to automate the "2x daily" part entirely in the cloud?
 

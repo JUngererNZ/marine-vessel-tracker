@@ -1,3 +1,5 @@
+# Dependencies: Ensure you've run pip install websockets python-dotenv
+
 import asyncio
 import websockets
 import json
@@ -75,7 +77,7 @@ async def sync_vessels():
     except Exception as e:
         print(f"Connection error: {e}")
 
-    # Generate Markdown Output
+    # Generate Markdown Output, added a "Map Link" column
     write_markdown(results, targets)
 
 def write_markdown(results, targets):
